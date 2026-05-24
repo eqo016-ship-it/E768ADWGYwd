@@ -1,10 +1,12 @@
-"""Impor fungsi ekstrak link dari vidoy_client di folder induk (tanpa duplikasi kode)."""
+"""Impor vidoy_client: folder bot ini dulu (Docker), lalu folder induk (develop lokal)."""
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+_BOT_DIR = Path(__file__).resolve().parent
+_PARENT = _BOT_DIR.parent
+for _p in (_BOT_DIR, _PARENT):
+    if (_p / "vidoy_client.py").is_file() and str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from vidoy_client import (  # noqa: E402
     FOLDER_LINK_PATTERN,
