@@ -1,3 +1,4 @@
+# @name: config.py v2.0
 import os
 from pathlib import Path
 
@@ -17,13 +18,16 @@ PORT = int((os.getenv("PORT") or "8081").strip())
 VIDOY_EXTRACT_DOMAIN = (os.getenv("VIDOY_EXTRACT_DOMAIN") or "videq.pro").strip().lower()
 
 MAX_VIDEOS_PER_JOB = int((os.getenv("MAX_VIDEOS_PER_JOB") or "30").strip())
-# Batas resmi Bot API Telegram untuk upload file ≈ 50 MB (BUKAN 2 GB seperti user biasa)
-TELEGRAM_BOT_FILE_LIMIT_MB = 49.0
-_raw_tg_mb = float((os.getenv("MAX_TELEGRAM_MB") or "48").strip())
+
+# Plafon maksimal kita set ke 1000 MB
+TELEGRAM_BOT_FILE_LIMIT_MB = 1000.0
+_raw_tg_mb = float((os.getenv("MAX_TELEGRAM_MB") or "1000").strip())
 MAX_TELEGRAM_MB = min(_raw_tg_mb, TELEGRAM_BOT_FILE_LIMIT_MB)
-# Maks yang mau diunduh ke disk; di atas ini hanya kirim link (hindari timeout & file rusak)
+
+# Maks yang mau diunduh ke disk; diubah batas mentoknya jadi 1000 MB
 MAX_DOWNLOAD_MB = float((os.getenv("MAX_DOWNLOAD_MB") or str(int(MAX_TELEGRAM_MB))).strip())
-MAX_DOWNLOAD_MB = min(MAX_DOWNLOAD_MB, 500.0)  # plafon keamanan server
+MAX_DOWNLOAD_MB = min(MAX_DOWNLOAD_MB, 1000.0)
+
 MIN_VALID_VIDEO_BYTES = int((os.getenv("MIN_VALID_VIDEO_BYTES") or "50000").strip())
 # Folder legacy (dibersihkan saat startup); unduhan pakai folder sementara per job
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR") or (_BOT_DIR / "downloads"))
@@ -32,7 +36,7 @@ REQUEST_TIMEOUT = int((os.getenv("REQUEST_TIMEOUT") or "45").strip())
 DOWNLOAD_CONNECT_TIMEOUT = int((os.getenv("DOWNLOAD_CONNECT_TIMEOUT") or "30").strip())
 DOWNLOAD_READ_TIMEOUT = int((os.getenv("DOWNLOAD_READ_TIMEOUT") or "900").strip())
 DELAY_BETWEEN_VIDEOS_SEC = float((os.getenv("DELAY_BETWEEN_VIDEOS_SEC") or "2").strip())
-# Upload video ke Telegram (file besar)
+# Upload video ke Telegram (file besar butuh timeout lebih lama)
 TELEGRAM_MEDIA_TIMEOUT = float((os.getenv("TELEGRAM_MEDIA_TIMEOUT") or "300").strip())
 
 ADMIN_IDS: set[int] = set()
@@ -50,7 +54,7 @@ def validate() -> list[str]:
     if _raw_tg_mb > TELEGRAM_BOT_FILE_LIMIT_MB:
         print(
             f"Peringatan: MAX_TELEGRAM_MB={_raw_tg_mb} terlalu besar. "
-            f"Bot Telegram maks ~{int(TELEGRAM_BOT_FILE_LIMIT_MB)} MB — "
+            f"Sistem dibatasi maks ~{int(TELEGRAM_BOT_FILE_LIMIT_MB)} MB — "
             f"dipakai {MAX_TELEGRAM_MB} MB."
         )
     return errors
