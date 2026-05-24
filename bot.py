@@ -1,4 +1,5 @@
 """
+@name: Vidoy Downloader Bot v2.0
 Bot Telegram: unduh video dari link Vidoy (/d/, /e/, /f/).
 Folder bersarang: tampilkan subfolder + opsi unduh semua video di folder aktif.
 """
@@ -148,8 +149,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Cara pakai</b>\n"
         "1. Tempel 1 link video atau folder.\n"
         "2. Pilih tombol di bawah pesan.\n"
-        f"3. Bot mengirim video ke chat (maks <b>{config.MAX_TELEGRAM_MB:.0f} MB</b> — "
-        "batas <b>bot</b> Telegram, bukan 2 GB seperti akun biasa).\n"
+        "3. Bot mengirim video ke chat (maks <b>2000 MB / 2 GB</b> — "
+        "menggunakan server Local Telegram Bot API).\n"
         "4. Video lebih besar / timeout: bot kirim <b>link unduhan</b> saja.\n"
         "5. Thumbnail hitam & 0:00 = file rusak/tidak lengkap (sudah dicek otomatis).\n\n"
         "<b>Folder dalam folder</b>: buka subfolder lewat tombol 📁, "
@@ -311,7 +312,7 @@ async def _send_file_or_link(
                 chat_id,
                 caption,
                 fallback_url,
-                f"File <b>{mb:.1f} MB</b> — terlalu besar untuk dikirim lewat Telegram.",
+                f"File <b>{mb:.1f} MB</b> — terlalu besar untuk dikirim lewat Telegram (maks 2 GB).",
             )
     finally:
         cleanup_path(local_path)
@@ -346,7 +347,7 @@ async def _process_one_video(
         title = resolved.title or page_url
         caption_ok = f"✅ {cap_prefix} {title}"
 
-        # File besar: bot Telegram TIDAK bisa kirim 2 GB — hanya ~50 MB
+        # Pengondisian batas file besar disesuaikan ke Local Bot API (maks 2 GB)
         limit = remote_size or 0
         if limit > dl_max:
             mb = limit / (1024 * 1024)
@@ -357,7 +358,7 @@ async def _process_one_video(
                 resolved.direct_url,
                 (
                     f"Video <b>{mb:.1f} MB</b> — terlalu besar untuk diunduh & dikirim bot "
-                    f"(maks upload bot ≈ <b>{config.MAX_TELEGRAM_MB:.0f} MB</b>, bukan 2 GB). "
+                    f"(maks upload bot ≈ 2 GB). "
                     "Salin link di bawah ke IDM / browser."
                 ),
             )
@@ -590,8 +591,6 @@ def main():
     if config.DOWNLOAD_DIR.exists():
         cleanup_dir(config.DOWNLOAD_DIR)
     start_health_server(config.PORT)
-    # Timeout lebih longgar + bootstrap_retries: cegah crash saat getMe gagal
-    # (gejala: ExtBot is not properly initialized / coroutine was never awaited)
     app = (
         Application.builder()
         .token(config.TELEGRAM_BOT_TOKEN)
