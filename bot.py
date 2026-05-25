@@ -1,5 +1,4 @@
 """
-@name: Vidoy Downloader Bot v2.0
 Bot Telegram: unduh video dari link Vidoy (/d/, /e/, /f/).
 Folder bersarang: tampilkan subfolder + opsi unduh semua video di folder aktif.
 """
@@ -20,8 +19,6 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram import InputFile
-
 import config
 from download_worker import (
     cleanup_dir,
@@ -149,8 +146,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Cara pakai</b>\n"
         "1. Tempel 1 link video atau folder.\n"
         "2. Pilih tombol di bawah pesan.\n"
-        "3. Bot mengirim video ke chat (maks <b>2000 MB / 2 GB</b> — "
-        "menggunakan server Local Telegram Bot API).\n"
+        f"3. Bot mengirim video ke chat (maks <b>{config.MAX_TELEGRAM_MB:.0f} MB</b>"
+        + (
+            ", via <b>Local Bot API</b> ~2 GB)."
+            if config.LOCAL_MODE_ACTIVE
+            else " — batas Bot API cloud ~50 MB)."
+        )
+        + "\n"
         "4. Video lebih besar / timeout: bot kirim <b>link unduhan</b> saja.\n"
         "5. Thumbnail hitam & 0:00 = file rusak/tidak lengkap (sudah dicek otomatis).\n\n"
         "<b>Folder dalam folder</b>: buka subfolder lewat tombol 📁, "
@@ -293,18 +295,27 @@ async def _send_file_or_link(
 
     try:
         if size <= max_bytes:
-            with open(local_path, "rb") as f:
+            # Local Bot API + local_mode: kirim path (file://), tidak baca seluruh file ke RAM
+            video_arg = (
+                str(local_path.resolve())
+                if config.LOCAL_MODE_ACTIVE
+                else open(local_path, "rb")
+            )
+            try:
                 await asyncio.wait_for(
                     context.bot.send_video(
                         chat_id=chat_id,
-                        video=InputFile(f, filename=local_path.name),
+                        video=video_arg,
                         caption=caption[:1024],
                         supports_streaming=True,
                         read_timeout=config.TELEGRAM_MEDIA_TIMEOUT,
                         write_timeout=config.TELEGRAM_MEDIA_TIMEOUT,
                     ),
-                    timeout=config.TELEGRAM_MEDIA_TIMEOUT + 30,
+                    timeout=config.TELEGRAM_MEDIA_TIMEOUT + 60,
                 )
+            finally:
+                if not config.LOCAL_MODE_ACTIVE and hasattr(video_arg, "close"):
+                    video_arg.close()
         else:
             mb = size / (1024 * 1024)
             await _send_direct_link_only(
@@ -312,7 +323,7 @@ async def _send_file_or_link(
                 chat_id,
                 caption,
                 fallback_url,
-                f"File <b>{mb:.1f} MB</b> — terlalu besar untuk dikirim lewat Telegram (maks 2 GB).",
+                f"File <b>{mb:.1f} MB</b> — terlalu besar untuk dikirim lewat Telegram.",
             )
     finally:
         cleanup_path(local_path)
@@ -347,7 +358,7 @@ async def _process_one_video(
         title = resolved.title or page_url
         caption_ok = f"✅ {cap_prefix} {title}"
 
-        # Pengondisian batas file besar disesuaikan ke Local Bot API (maks 2 GB)
+        # File besar: bot Telegram TIDAK bisa kirim 2 GB — hanya ~50 MB
         limit = remote_size or 0
         if limit > dl_max:
             mb = limit / (1024 * 1024)
@@ -357,8 +368,8 @@ async def _process_one_video(
                 caption_ok,
                 resolved.direct_url,
                 (
-                    f"Video <b>{mb:.1f} MB</b> — terlalu besar untuk diunduh & dikirim bot "
-                    f"(maks upload bot ≈ 2 GB). "
+                    f"Video <b>{mb:.1f} MB</b> — melebihi batas bot "
+                    f"(maks ≈ <b>{config.MAX_TELEGRAM_MB:.0f} MB</b>). "
                     "Salin link di bawah ke IDM / browser."
                 ),
             )
@@ -581,6 +592,33 @@ async def callback_vdl(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
+def _build_application() -> Application:
+    builder = (
+        Application.builder()
+        .token(config.TELEGRAM_BOT_TOKEN)
+        .connect_timeout(60.0)
+        .read_timeout(60.0)
+        .write_timeout(config.TELEGRAM_MEDIA_TIMEOUT)
+        .media_write_timeout(config.TELEGRAM_MEDIA_TIMEOUT)
+        .get_updates_connect_timeout(100.0)
+        .get_updates_read_timeout(100.0)
+    )
+    if config.LOCAL_MODE_ACTIVE:
+        builder = (
+            builder.base_url(config.LOCAL_BOT_API_BASE_URL)
+            .base_file_url(config.LOCAL_BOT_API_FILE_URL)
+            .local_mode(True)
+        )
+        logger.info(
+            "Mode Local Bot API: %s (upload maks ~%.0f MB)",
+            config.LOCAL_BOT_API_BASE_URL,
+            config.MAX_TELEGRAM_MB,
+        )
+    else:
+        logger.info("Mode Bot API cloud (upload maks ~%.0f MB)", config.MAX_TELEGRAM_MB)
+    return builder.build()
+
+
 def main():
     errs = config.validate()
     if errs:
@@ -591,22 +629,13 @@ def main():
     if config.DOWNLOAD_DIR.exists():
         cleanup_dir(config.DOWNLOAD_DIR)
     start_health_server(config.PORT)
-    app = (
-        Application.builder()
-        .token(config.TELEGRAM_BOT_TOKEN)
-        .connect_timeout(60.0)
-        .read_timeout(60.0)
-        .write_timeout(config.TELEGRAM_MEDIA_TIMEOUT)
-        .media_write_timeout(config.TELEGRAM_MEDIA_TIMEOUT)
-        .get_updates_connect_timeout(100.0)
-        .get_updates_read_timeout(100.0)
-        .build()
-    )
+    app = _build_application()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CallbackQueryHandler(callback_vdl, pattern=r"^vdl:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    print(f"Vidoy Downloader Bot jalan (port health {config.PORT})…")
+    mode = "Local Bot API" if config.LOCAL_MODE_ACTIVE else "cloud"
+    print(f"Vidoy Downloader Bot jalan ({mode}, health port {config.PORT})…")
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,
         bootstrap_retries=5,

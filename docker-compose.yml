@@ -1,0 +1,11 @@
+# Uji lokal: Local Bot API + bot dalam satu container
+services:
+  vidoy-bot:
+    build: .
+    env_file: .env
+    ports:
+      - "8000:8000"
+    environment:
+      USE_LOCAL_BOT_API: "true"
+      PORT: "8000"
+      LOCAL_BOT_API_HTTP_PORT: "8081"
