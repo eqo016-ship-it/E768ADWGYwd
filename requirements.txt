@@ -1,4 +1,4 @@
 pyrogram>=2.0.106,<3
-tgcrypto
+##tgcrypto
 python-dotenv==1.0.1
 requests>=2.31.0
