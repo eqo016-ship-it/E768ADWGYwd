@@ -1,4 +1,5 @@
 """Ambil URL unduhan langsung dari halaman /d/ atau /e/ (host mirip Doodstream/Vidoy)."""
+import html as html_module
 import json
 import re
 from dataclasses import dataclass
@@ -51,6 +52,14 @@ class ResolvedStream:
     title: str = ""
     is_hls: bool = False
     page_url: str = ""
+    referer_url: str = ""  # Referer untuk CDN (biasanya halaman embed)
+
+
+def _normalize_media_url(url: str) -> str:
+    """Perbaiki URL dari HTML (&amp; → &) agar token CDN tidak invalid."""
+    u = html_module.unescape((url or "").strip())
+    u = u.replace(" ", "%20")
+    return u
 
 
 def _video_id_and_base(page_url: str) -> tuple[str, str, str]:
@@ -128,11 +137,11 @@ def _resolve_via_embed_player(
     for pat in (VIDEO_SOURCE_PATTERN, VIDEO_SRC_PATTERN):
         sm = pat.search(html)
         if sm:
-            url = sm.group(1).strip()
+            url = _normalize_media_url(sm.group(1))
             if url.startswith("http"):
                 return url
     for pat in MP4_IN_HTML.finditer(html):
-        url = pat.group(0)
+        url = _normalize_media_url(pat.group(0))
         if "thumbnail" not in url.lower() and "preview" not in url.lower():
             return url
     return None
@@ -171,19 +180,19 @@ def _pass_md5_request(
             )
             text = (r.text or "").strip()
             if text.startswith("http"):
-                return text.split("\n")[0].strip()
+                return _normalize_media_url(text.split("\n")[0].strip())
             try:
                 data = r.json()
                 if isinstance(data, dict):
                     for key in ("url", "download_url", "file", "link"):
                         v = data.get(key)
                         if isinstance(v, str) and v.startswith("http"):
-                            return v
+                            return _normalize_media_url(v)
             except Exception:
                 pass
             m = MP4_IN_HTML.search(text)
             if m:
-                return m.group(0)
+                return _normalize_media_url(m.group(0))
         except Exception:
             continue
     return None
@@ -202,20 +211,29 @@ def resolve_stream_url(page_url: str, timeout: int = 45) -> ResolvedStream:
     html = r.text or ""
     title = _pick_title(html, file_id)
 
+    bucket = "temporary"
+    bm = EMBED_BUCKET_PATTERN.search(html or "")
+    if bm:
+        bucket = bm.group(1).strip()
+    embed_page = f"{base}/embed.php?bucket={bucket}&id={file_id}"
+
     embed_direct = _resolve_via_embed_player(
         session, base, file_id, page_url, html, timeout
     )
     if embed_direct:
         return ResolvedStream(
-            direct_url=embed_direct,
+            direct_url=_normalize_media_url(embed_direct),
             title=title,
             page_url=page_url,
+            referer_url=embed_page,
         )
 
     for pat in MP4_IN_HTML.finditer(html):
-        url = pat.group(0)
+        url = _normalize_media_url(pat.group(0))
         if "thumbnail" not in url.lower() and "preview" not in url.lower():
-            return ResolvedStream(direct_url=url, title=title, page_url=page_url)
+            return ResolvedStream(
+                direct_url=url, title=title, page_url=page_url, referer_url=page_url
+            )
 
     pass_md5 = ""
     for pat in PASS_MD5_PATTERNS:
@@ -234,29 +252,32 @@ def resolve_stream_url(page_url: str, timeout: int = 45) -> ResolvedStream:
         if direct:
             is_hls = ".m3u8" in direct.lower()
             return ResolvedStream(
-                direct_url=direct,
+                direct_url=_normalize_media_url(direct),
                 title=title,
                 is_hls=is_hls,
                 page_url=page_url,
+                referer_url=page_url,
             )
 
     for pat in DOWNLOAD_URL_JSON.finditer(html):
         url = pat.group(1)
         if ".mp4" in url.lower() or ".m3u8" in url.lower():
             return ResolvedStream(
-                direct_url=url,
+                direct_url=_normalize_media_url(url),
                 title=title,
                 is_hls=".m3u8" in url.lower(),
                 page_url=page_url,
+                referer_url=page_url,
             )
 
     m3 = M3U8_IN_HTML.search(html)
     if m3:
         return ResolvedStream(
-            direct_url=m3.group(0),
+            direct_url=_normalize_media_url(m3.group(0)),
             title=title,
             is_hls=True,
             page_url=page_url,
+            referer_url=page_url,
         )
 
     # JSON tersembunyi di script
@@ -268,10 +289,11 @@ def resolve_stream_url(page_url: str, timeout: int = 45) -> ResolvedStream:
                     v = data.get(key)
                     if isinstance(v, str) and v.startswith("http"):
                         return ResolvedStream(
-                            direct_url=v,
+                            direct_url=_normalize_media_url(v),
                             title=title,
                             is_hls=".m3u8" in v.lower(),
                             page_url=page_url,
+                            referer_url=page_url,
                         )
         except Exception:
             continue

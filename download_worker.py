@@ -2,6 +2,8 @@ import logging
 import re
 import shutil
 from pathlib import Path
+from typing import Callable
+from urllib.parse import urlparse
 
 import requests
 
@@ -42,13 +44,27 @@ def validate_local_video(path: Path, expected_size: int | None = None) -> tuple[
 
 
 def _download_headers(resolved: ResolvedStream) -> dict:
-    return {
+    referer = (
+        resolved.referer_url
+        or resolved.page_url
+        or resolved.direct_url
+    )
+    origin = ""
+    if resolved.page_url and "://" in resolved.page_url:
+        p = urlparse(resolved.page_url)
+        origin = f"{p.scheme}://{p.netloc}"
+    headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ),
-        "Referer": resolved.page_url or resolved.direct_url,
+        "Referer": referer,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
     }
+    if origin:
+        headers["Origin"] = origin
+    return headers
 
 
 def remote_content_length(
@@ -84,6 +100,7 @@ def download_to_path(
     dest_dir: Path,
     connect_timeout: int = 30,
     read_timeout: int = 900,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     """Unduh file ke folder tujuan; file .part dihapus jika gagal."""
     if resolved.is_hls:
@@ -124,6 +141,10 @@ def download_to_path(
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
+                        if on_progress and expected_size:
+                            on_progress(downloaded, expected_size)
+                        elif on_progress and downloaded % (CHUNK * 4) < len(chunk):
+                            on_progress(downloaded, expected_size or downloaded)
             if expected_size and downloaded < expected_size * 0.97:
                 raise RuntimeError(
                     f"Unduhan putus: {downloaded / (1024*1024):.1f} MB "
